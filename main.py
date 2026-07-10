@@ -211,32 +211,107 @@ async def extract(request: Request):
     return out
 
 # ================= Q4: /dynamic-extract =================
+# def coerce(value, typ):
+#     """Force the LLM output to the exact JSON type the schema asked for.
+#     Handles ALL Q4 supported types: string, integer, float, boolean, date,
+#     array[string], array[integer]."""
+#     if value is None:
+#         return None
+#     try:
+#         t = str(typ).lower().strip()
+#         if t == "integer":
+#             return int(round(float(str(value).replace(",", ""))))
+#         if t in ("float", "number"):
+#             return float(str(value).replace(",", ""))
+#         if t == "boolean":
+#             if isinstance(value, bool):
+#                 return value
+#             return str(value).strip().lower() in ("true", "1", "yes", "y")
+#         if t == "date":
+#             return str(value).strip()                     # already asked as YYYY-MM-DD
+#         if t == "array[integer]":
+#             lst = value if isinstance(value, list) else [value]
+#             return [int(round(float(x))) for x in lst]
+#         if t.startswith("array"):                         # array[string] / array
+#             lst = value if isinstance(value, list) else [value]
+#             return [str(x).strip().rstrip(".").strip() if isinstance(x, str) else x for x in lst]
+#         # plain string: trim and drop a trailing sentence period ("Alpha Store." -> "Alpha Store")
+#         return str(value).strip().rstrip(".").strip()
+#     except Exception:
+#         return None
+
+# @app.post("/dynamic-extract")
+# async def dynamic_extract(request: Request):
+#     body = await request.json()
+#     text = body.get("text", "")
+#     schema = body.get("schema", {})
+#     keys = list(schema.keys())
+
+#     prompt = (
+#         "Extract variables from the text. Return JSON with EXACTLY these keys:\n"
+#         f"{json.dumps(schema, indent=2)}\n\n"
+#         "Rules: dates -> ISO YYYY-MM-DD; integer/float -> JSON numbers (not "
+#         "strings); boolean -> true/false; array[...] -> JSON array; if a field "
+#         "cannot be found use null. Extract the SHORTEST exact value (e.g. for a "
+#         "name give just the name).\n\n"
+#         f"TEXT:\n{text}"
+#     )
+#     try:
+#         out = parse_json(await chat([{"role": "user", "content": prompt}]))
+#     except Exception:
+  #      out = {}
+    # enforce exact key set AND correct types
+    # return {k: coerce(out.get(k, None), schema[k]) for k in keys}
+
+
 def coerce(value, typ):
     """Force the LLM output to the exact JSON type the schema asked for.
-    Handles ALL Q4 supported types: string, integer, float, boolean, date,
-    array[string], array[integer]."""
+    Handles ALL Q4 supported types: string, integer, float, boolean, date, time, array[string], array[integer]."""
     if value is None:
         return None
     try:
         t = str(typ).lower().strip()
+        
+        # Handle time extraction and format mapping (ISO string/HH:MM:SS -> HH:MM)
+        if t == "time":
+            val_str = str(value).strip()
+            # If the LLM returned a full ISO timestamp (e.g., "2026-05-20T14:32:00")
+            if "t" in val_str.lower():
+                val_str = val_str.lower().split("t")[1]
+            
+            # Truncate seconds if present ("14:32:00" or "14:32:00Z" -> "14:32")
+            parts = val_str.split(":")
+            if len(parts) >= 2:
+                hh = parts[0].strip()
+                mm = parts[1].strip()[:2]  # strip trailing Z or milliseconds if any
+                return f"{hh}:{mm}"
+            return val_str
+
         if t == "integer":
             return int(round(float(str(value).replace(",", ""))))
+            
         if t in ("float", "number"):
             return float(str(value).replace(",", ""))
+            
         if t == "boolean":
             if isinstance(value, bool):
                 return value
             return str(value).strip().lower() in ("true", "1", "yes", "y")
+            
         if t == "date":
-            return str(value).strip()                     # already asked as YYYY-MM-DD
+            return str(value).strip()  # already asked as YYYY-MM-DD
+            
         if t == "array[integer]":
             lst = value if isinstance(value, list) else [value]
             return [int(round(float(x))) for x in lst]
-        if t.startswith("array"):                         # array[string] / array
+            
+        if t.startswith("array"):  # array[string] / array
             lst = value if isinstance(value, list) else [value]
             return [str(x).strip().rstrip(".").strip() if isinstance(x, str) else x for x in lst]
-        # plain string: trim and drop a trailing sentence period ("Alpha Store." -> "Alpha Store")
+            
+        # plain string: trim and drop a trailing sentence period
         return str(value).strip().rstrip(".").strip()
+        
     except Exception:
         return None
 
@@ -246,22 +321,26 @@ async def dynamic_extract(request: Request):
     text = body.get("text", "")
     schema = body.get("schema", {})
     keys = list(schema.keys())
-
+    
     prompt = (
         "Extract variables from the text. Return JSON with EXACTLY these keys:\n"
         f"{json.dumps(schema, indent=2)}\n\n"
-        "Rules: dates -> ISO YYYY-MM-DD; integer/float -> JSON numbers (not "
-        "strings); boolean -> true/false; array[...] -> JSON array; if a field "
-        "cannot be found use null. Extract the SHORTEST exact value (e.g. for a "
-        "name give just the name).\n\n"
+        "Rules: dates -> ISO YYYY-MM-DD; time -> HH:MM (24-hour format, e.g., 14:32); "
+        "integer/float -> JSON numbers (not strings); boolean -> true/false; "
+        "array[...] -> JSON array; if a field cannot be found use null. "
+        "Extract the SHORTEST exact value (e.g. for a name give just the name).\n\n"
         f"TEXT:\n{text}"
     )
+    
     try:
+        # Mock function placeholder for your project's chat and parse_json logic
         out = parse_json(await chat([{"role": "user", "content": prompt}]))
     except Exception:
         out = {}
+        
     # enforce exact key set AND correct types
     return {k: coerce(out.get(k, None), schema[k]) for k in keys}
+
 
 # ================= Q6: /answer-audio =================
 last_debug_info = {}
